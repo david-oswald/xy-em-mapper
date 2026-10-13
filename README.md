@@ -7,7 +7,7 @@ Three parts:
 
 - **`em-mapper.py` / `mapper/`**: moves the probe over an XY grid and captures
   traces at every point (e.g. fixed-vs-random), writing everything into one
-  HDF5 file.
+  HDF5 file. **`plot-xy.py`** turns such a file into a heatmap.
 - **`scopes/`**: a small oscilloscope abstraction for fast, segmented trace
   capture into numpy arrays. Backends: PicoScope 6000E series (e.g. 6424E).
   Rigol is planned.
@@ -20,6 +20,7 @@ It runs on Linux, Windows (natively or in WSL2) and macOS.
 
 ```
 em-mapper.py          CLI: capture traces on an XY grid from a JSON config
+plot-xy.py            CLI: heatmap of a capture file (mean, rms, t-test, plug-ins)
 scope.py              CLI: list oscilloscopes, record a test trace
 xy-demo.py            CLI: trace a square toolpath with the CNC stage
 mapper/
@@ -28,6 +29,8 @@ mapper/
   targets.py          start/next/end hooks into the device under test
   storage.py          HDF5 output file
   runner.py           the mapping loop
+  metrics.py          per-point metrics for plot-xy.py
+  plugins.py          loading of strategies / targets / metrics
 scopes/
   base.py             Scope interface (Scope, ChannelConfig, TriggerConfig, ...)
   picoscope6000e.py   PicoScope 6000E backend (ps6000a driver, via ctypes)
@@ -46,7 +49,7 @@ requirements.txt
 You need:
 
 1. Python 3.10 or newer
-2. The Python packages in `requirements.txt` (`numpy`, `h5py`, `pyserial`)
+2. The Python packages in `requirements.txt` (`numpy`, `h5py`, `matplotlib`, `pyserial`)
 3. For PicoScope capture, the vendor **PicoSDK**. pip can't install it; see
    [Install PicoSDK](#3-install-picosdk-for-picoscope-capture) below.
 
@@ -562,6 +565,73 @@ with h5py.File("em-map.h5", "r") as f:
 The file can also be read with `h5py` in Python, MATLAB (`h5read`), Julia
 (HDF5.jl), and `h5dump` / HDFView. A point's traces are stored contiguously,
 so reading a single point is fast.
+
+---
+
+## Plotting: `plot-xy.py`
+
+`plot-xy.py` reads a file written by `em-mapper.py` and draws one heatmap
+cell per grid point. A **metric** reduces the traces of each point to a
+single value. Auto-triggered traces are excluded, and unfinished points stay
+blank.
+
+```bash
+python plot-xy.py em-map.h5                                   # mean, shown in a window
+python plot-xy.py em-map.h5 --metric rms -o rms.png           # save instead of showing
+python plot-xy.py em-map.h5 --metric ttest --samples 1000:3000 --csv tvla.csv -o tvla.png
+```
+
+| Option | Meaning |
+|---|---|
+| `--metric` | `mean` (default), `rms`, `ttest`, or a plug-in `module:Class` / `file.py:Class` |
+| `--metric-arg KEY=VALUE` | constructor argument for the metric (JSON values, e.g. `raw=true`); repeatable |
+| `--channel` | channel to evaluate (default: first recorded) |
+| `--samples START:STOP` | only use this sample window of each trace, e.g. the encryption rounds |
+| `--cmap`, `--vmin`, `--vmax` | colour map and fixed colour limits (for comparing runs) |
+| `-o`, `--output` | save as png/pdf/svg instead of opening a window (use this on headless machines / WSL without a display) |
+| `--csv` | also write `x_mm, y_mm, value, n_traces` per point |
+
+Built-in metrics:
+
+| Metric | Value per point |
+|---|---|
+| `mean` | mean over all traces and samples, in V |
+| `rms` | RMS over time of the average trace, in V (signal synchronous to the trigger; uncorrelated noise averages out). `raw=true`: RMS over all samples of all traces |
+| `ttest` | max \|t\| of Welch's t-test between two classes over the window (TVLA; > 4.5 is the usual leakage threshold). `group_a` / `group_b` select the classes (default `fixed` / `random`) |
+
+### Custom metrics
+
+Subclass `mapper.metrics.PointMetric`. It receives a `PointData` per point
+with the valid traces (raw ADC values, restricted to `--samples`),
+plaintexts, labels, position and scaling:
+
+```python
+# my_metrics.py
+import numpy as np
+from mapper.metrics import PointMetric
+
+class PeakToPeak(PointMetric):
+    title = "peak-to-peak of average trace"
+    unit = "V"
+
+    def __init__(self, label: str | None = None):
+        self.label = label          # e.g. only the "fixed" traces
+
+    def __call__(self, data, channel):
+        raw = data.traces[channel]
+        if self.label is not None:
+            raw = raw[data.labels == data.label(self.label)]
+        avg = data.to_volts(channel, raw.mean(axis=0))
+        return float(avg.max() - avg.min())
+```
+
+```bash
+python plot-xy.py em-map.h5 --metric my_metrics.py:PeakToPeak --metric-arg label=fixed
+```
+
+Useful `PointData` members: `traces[ch]` (raw `(n, n_window)`),
+`volts(ch)`, `to_volts(ch, value)`, `labels`, `label(name)`, `plaintexts`,
+`x` / `y` / `z`, `sample_interval_s`, `window`.
 
 ---
 
