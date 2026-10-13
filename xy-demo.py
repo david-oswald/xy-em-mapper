@@ -1,7 +1,7 @@
 """Trace a square toolpath with a CNC controller.
 
 Example:
-  python map.py --port /dev/ttyUSB0 --side-mm 40 --steps 10
+  python xy-demo.py --port /dev/ttyUSB0 --side-mm 40 --steps 10
 """
 
 from __future__ import annotations

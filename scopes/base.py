@@ -34,6 +34,10 @@ class ScopeDriverError(ScopeError):
     """Raised when the vendor driver/library is missing or returns an error."""
 
 
+class ScopeNoDataError(ScopeError):
+    """Raised by fetch() when not a single segment was captured (e.g. after a timeout)."""
+
+
 class Coupling(enum.Enum):
     AC = "ac"
     DC = "dc"  # high impedance (1 MOhm)

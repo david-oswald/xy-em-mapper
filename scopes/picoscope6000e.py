@@ -38,6 +38,7 @@ from .base import (
     Scope,
     ScopeDriverError,
     ScopeError,
+    ScopeNoDataError,
     ScopeNotFoundError,
     TriggerConfig,
 )
@@ -483,7 +484,7 @@ class PicoScope6000E(Scope):
         _check(lib.ps6000aGetNoOfCaptures(h, byref(captured)), "ps6000aGetNoOfCaptures")
         n = min(int(captured.value), self._armed_segments)
         if n == 0:
-            raise ScopeError("No segments were captured")
+            raise ScopeNoDataError("No segments were captured")
 
         for ch, arr in out.items():
             if ch not in self._channel_cfg:

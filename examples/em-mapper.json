@@ -1,0 +1,40 @@
+{
+  "scope": {
+    "backend": "picoscope6000e",
+    "serial": null,
+    "channels": [
+      {"name": "A", "range_v": 0.05, "coupling": "ac", "offset_v": 0.0},
+      {"name": "B", "range_v": 5.0, "coupling": "dc"}
+    ],
+    "sample_rate_hz": 1.25e9,
+    "n_samples": 5000,
+    "delay_s": -1e-8,
+    "trigger": {"source": "B", "level_v": 1.5, "edge": "rising", "auto_trigger_s": 0.1},
+    "segments_per_arm": null,
+    "timeout_s": 10,
+    "max_retries": 3
+  },
+  "stage": {
+    "port": "/dev/ttyUSB0",
+    "baudrate": 115200,
+    "feed_mm_min": 600,
+    "z_safe": 5.0,
+    "settle_s": 0.2
+  },
+  "grid": {
+    "x_start": 0.0, "x_end": 10.0, "x_step": 0.5,
+    "y_start": 0.0, "y_end": 10.0, "y_step": 0.5,
+    "z": 0.0,
+    "order": "serpentine"
+  },
+  "traces_per_point": 1000,
+  "strategy": {
+    "name": "fixed_vs_random",
+    "fixed_plaintext": "da39a3ee5e6b4b0d3255bfef95601890",
+    "order": "random",
+    "seed": 1
+  },
+  "target": {"name": "none"},
+  "output": "em-map.h5",
+  "compression": null
+}

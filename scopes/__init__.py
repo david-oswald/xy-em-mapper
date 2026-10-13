@@ -20,6 +20,7 @@ from .base import (
     Scope,
     ScopeDriverError,
     ScopeError,
+    ScopeNoDataError,
     ScopeNotFoundError,
     TriggerConfig,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "Scope",
     "ScopeDriverError",
     "ScopeError",
+    "ScopeNoDataError",
     "ScopeNotFoundError",
     "TriggerConfig",
     "get_backend",
