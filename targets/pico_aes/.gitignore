@@ -1,0 +1,28 @@
+# CMake build directories (build/, build-pico2/, ...)
+build/
+build-*/
+cmake-build-*/
+
+# In-source CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+Makefile
+build.ninja
+.ninja_*
+compile_commands.json
+_deps/
+generated/
+
+# Firmware / toolchain outputs
+*.uf2
+*.elf
+*.elf.map
+*.map
+*.bin
+*.hex
+*.dis
+*.o
+*.a
+*.d
