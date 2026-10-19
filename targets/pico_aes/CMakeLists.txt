@@ -21,8 +21,8 @@ add_executable(pico_aes
 # build type, so the leakage is easy to see.
 set_source_files_properties(src/aes.c PROPERTIES COMPILE_OPTIONS "-O0")
 
-# Optional overrides, e.g. -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5
-foreach(opt TRIGGER_PIN BLOCK_DELAY_MS TRIGGER_DISABLE_IRQ)
+# Optional overrides, e.g. -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5 -DSYS_CLOCK_KHZ=20000
+foreach(opt TRIGGER_PIN BLOCK_DELAY_MS TRIGGER_DISABLE_IRQ SYS_CLOCK_KHZ)
     if(DEFINED ${opt})
         target_compile_definitions(pico_aes PRIVATE ${opt}=${${opt}})
     endif()
@@ -41,7 +41,7 @@ add_custom_target(pico_aes_version
 add_dependencies(pico_aes pico_aes_version)
 target_include_directories(pico_aes PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
-target_link_libraries(pico_aes pico_stdlib hardware_sync)
+target_link_libraries(pico_aes pico_stdlib hardware_sync hardware_clocks hardware_pll)
 
 # Run entirely from SRAM: avoids XIP flash cache misses adding jitter.
 pico_set_binary_type(pico_aes copy_to_ram)

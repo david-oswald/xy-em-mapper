@@ -18,7 +18,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "hardware/clocks.h"
 #include "hardware/gpio.h"
+#include "hardware/pll.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
 
@@ -40,6 +42,19 @@
 /* Disable interrupts while the trigger is low to reduce trace jitter. */
 #ifndef TRIGGER_DISABLE_IRQ
 #define TRIGGER_DISABLE_IRQ 1
+#endif
+
+/*
+ * System (CPU) clock in kHz. A low clock makes traces easier to capture with
+ * modest scope bandwidth / sample rates.
+ *   12000  clk_sys runs directly from the 12 MHz crystal, PLL_SYS is switched
+ *          off (least clock noise / jitter).
+ *   other  clk_sys from PLL_SYS; must be exactly reachable, e.g. 20000,
+ *          24000, 48000, 125000 (startup panics otherwise).
+ * USB and UART stay on the 48 MHz USB PLL, so serial works at any setting.
+ */
+#ifndef SYS_CLOCK_KHZ
+#define SYS_CLOCK_KHZ 12000
 #endif
 
 /* Default key and input: FIPS-197 / SP 800-38A F.1.1 test vector. */
@@ -100,6 +115,16 @@ static const char *skip_spaces(const char *s)
         s++;
     }
     return s;
+}
+
+static void setup_clocks(void)
+{
+#if SYS_CLOCK_KHZ * 1000 == XOSC_HZ
+    clock_configure_undivided(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, XOSC_HZ);
+    pll_deinit(pll_sys);
+#else
+    set_sys_clock_khz(SYS_CLOCK_KHZ, true);
+#endif
 }
 
 static void reset_state(void)
@@ -211,6 +236,7 @@ static void handle_line(char *line)
 
 int main(void)
 {
+    setup_clocks();
     stdio_init_all();
 
     gpio_init(TRIGGER_PIN);

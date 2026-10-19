@@ -104,10 +104,20 @@ These compile-time options live at the top of [src/main.c](src/main.c). You can 
 | `TRIGGER_PIN`         | `2`     | GPIO used as the trigger output |
 | `BLOCK_DELAY_MS`      | `1`     | Delay between consecutive blocks in an `e` run, in ms |
 | `TRIGGER_DISABLE_IRQ` | `1`     | Disable interrupts while the trigger is low (less jitter) |
+| `SYS_CLOCK_KHZ`       | `12000` | CPU clock in kHz (see below) |
 
 ```sh
-cmake -B build -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5
+cmake -B build -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5 -DSYS_CLOCK_KHZ=20000
 ```
+
+### CPU clock
+
+PicoAES runs the CPU at a deliberately low clock. That stretches each AES block out in time, so you can capture it with modest scope bandwidth and sample rates.
+
+- **`12000` (default):** `clk_sys` runs directly from the 12 MHz crystal, and the system PLL is switched off. This gives the least clock noise and jitter.
+- **Any other value:** `clk_sys` comes from the system PLL. The value must be reachable exactly, e.g. `20000`, `24000`, `48000`, or `125000` (the SDK default on RP2040). If it isn't, the firmware panics at startup.
+
+USB and UART run from the separate 48 MHz USB PLL, so serial works at any CPU clock.
 
 ## Building
 
@@ -168,7 +178,7 @@ There is no local echo or banner; type `v` and press Enter to check that it's al
 - Each `e` block re-encrypts the stored input. The key schedule is computed once (on boot and on `r`), not inside the triggered window.
 - USB CDC servicing runs in interrupt context. With `TRIGGER_DISABLE_IRQ=1` it can't land inside a trigger window, but it can still run during the inter-block delay.
 - For the cleanest traces, use UART instead of USB and/or a separate supply. You can also compare with `TRIGGER_DISABLE_IRQ=0` to see what interrupt jitter looks like.
-- The system clock is the SDK default (125 MHz on RP2040, 150 MHz on RP2350). Lowering it (`set_sys_clock_khz`) can make low-bandwidth captures easier.
+- At the default 12 MHz, one encryption takes roughly 10× longer than at the SDK's default 125 MHz. Use `SYS_CLOCK_KHZ` to trade capture length against bandwidth.
 
 ## Layout
 
