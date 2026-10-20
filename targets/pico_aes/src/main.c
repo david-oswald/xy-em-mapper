@@ -20,7 +20,6 @@
 
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
-#include "hardware/pll.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
 
@@ -45,16 +44,31 @@
 #endif
 
 /*
- * System (CPU) clock in kHz. A low clock makes traces easier to capture with
- * modest scope bandwidth / sample rates.
- *   12000  clk_sys runs directly from the 12 MHz crystal, PLL_SYS is switched
- *          off (least clock noise / jitter).
- *   other  clk_sys from PLL_SYS; must be exactly reachable, e.g. 20000,
- *          24000, 48000, 125000 (startup panics otherwise).
- * USB and UART stay on the 48 MHz USB PLL, so serial works at any setting.
+ * CPU clock in kHz while the AES runs. A low clock makes traces easier to
+ * capture with modest scope bandwidth / sample rates.
+ *   12000   the CPU runs at the SDK default clock, and switches clk_sys to the
+ *           12 MHz crystal (clk_ref) just for each encryption. The switch
+ *           completes, plus CLOCK_SETTLE_US, before the trigger goes low, and
+ *           the clock is switched back only after the trigger goes high, so
+ *           neither switch is inside the trigger window.
+ *   >=48000 clk_sys from PLL_SYS the whole time; must be exactly reachable,
+ *           e.g. 48000, 125000 (startup panics otherwise).
+ * USB device mode is unreliable with clk_sys below 48 MHz, which is why
+ * 12 MHz is only used inside the (interrupt-free) encryption window.
  */
 #ifndef SYS_CLOCK_KHZ
 #define SYS_CLOCK_KHZ 12000
+#endif
+
+#define AES_ON_CRYSTAL (SYS_CLOCK_KHZ * 1000 == XOSC_HZ)
+#if !AES_ON_CRYSTAL && SYS_CLOCK_KHZ < 48000
+#error "SYS_CLOCK_KHZ must be the crystal frequency (12000) or >= 48000; USB fails below 48 MHz"
+#endif
+
+/* Time to let the supply settle after switching to the crystal clock, before
+ * the trigger goes low (the core's current draw drops with the clock). */
+#ifndef CLOCK_SETTLE_US
+#define CLOCK_SETTLE_US 10
 #endif
 
 /* Default key and input: FIPS-197 / SP 800-38A F.1.1 test vector. */
@@ -119,13 +133,31 @@ static const char *skip_spaces(const char *s)
 
 static void setup_clocks(void)
 {
-#if SYS_CLOCK_KHZ * 1000 == XOSC_HZ
-    clock_configure_undivided(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, XOSC_HZ);
-    pll_deinit(pll_sys);
-#else
+#if !AES_ON_CRYSTAL
     set_sys_clock_khz(SYS_CLOCK_KHZ, true);
 #endif
+    /* clk_peri (UART) defaults to clk_sys; run it from the 48 MHz USB PLL so
+     * the baud rate is independent of clk_sys switching. */
+    clock_configure_undivided(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB, USB_CLK_KHZ * KHZ);
 }
+
+#if AES_ON_CRYSTAL
+/* Glitchless switch of clk_sys between clk_ref (12 MHz crystal) and its aux
+ * source (PLL_SYS). Returns once the new source is actually selected. */
+static inline void clk_sys_to_crystal(void)
+{
+    hw_clear_bits(&clocks_hw->clk[clk_sys].ctrl, CLOCKS_CLK_SYS_CTRL_SRC_BITS);
+    while (!(clocks_hw->clk[clk_sys].selected & (1u << CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF))) {
+    }
+}
+
+static inline void clk_sys_to_pll(void)
+{
+    hw_set_bits(&clocks_hw->clk[clk_sys].ctrl, CLOCKS_CLK_SYS_CTRL_SRC_BITS);
+    while (!(clocks_hw->clk[clk_sys].selected & (1u << CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX))) {
+    }
+}
+#endif
 
 static void reset_state(void)
 {
@@ -135,15 +167,23 @@ static void reset_state(void)
     gpio_put(TRIGGER_PIN, 1);
 }
 
-/* One triggered encryption. Trigger goes low before, high after. */
+/* One triggered encryption. Trigger goes low before, high after. With
+ * AES_ON_CRYSTAL the clock switches happen outside the trigger window. */
 static void encrypt_once(void)
 {
 #if TRIGGER_DISABLE_IRQ
     uint32_t irq_state = save_and_disable_interrupts();
 #endif
+#if AES_ON_CRYSTAL
+    clk_sys_to_crystal();
+    busy_wait_us_32(CLOCK_SETTLE_US);
+#endif
     gpio_put(TRIGGER_PIN, 0);
     aes128_encrypt(&aes_ctx, input, output);
     gpio_put(TRIGGER_PIN, 1);
+#if AES_ON_CRYSTAL
+    clk_sys_to_pll();
+#endif
 #if TRIGGER_DISABLE_IRQ
     restore_interrupts(irq_state);
 #endif

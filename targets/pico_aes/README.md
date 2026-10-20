@@ -104,20 +104,30 @@ These compile-time options live at the top of [src/main.c](src/main.c). You can 
 | `TRIGGER_PIN`         | `2`     | GPIO used as the trigger output |
 | `BLOCK_DELAY_MS`      | `1`     | Delay between consecutive blocks in an `e` run, in ms |
 | `TRIGGER_DISABLE_IRQ` | `1`     | Disable interrupts while the trigger is low (less jitter) |
-| `SYS_CLOCK_KHZ`       | `12000` | CPU clock in kHz (see below) |
+| `SYS_CLOCK_KHZ`       | `12000` | CPU clock in kHz while the AES runs (see below) |
+| `CLOCK_SETTLE_US`     | `10`    | Wait after switching to the crystal clock, before the trigger goes low |
 
 ```sh
-cmake -B build -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5 -DSYS_CLOCK_KHZ=20000
+cmake -B build -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5 -DSYS_CLOCK_KHZ=48000
 ```
 
 ### CPU clock
 
-PicoAES runs the CPU at a deliberately low clock. That stretches each AES block out in time, so you can capture it with modest scope bandwidth and sample rates.
+PicoAES runs the AES at a deliberately low clock. That stretches each block out in time, so you can capture it with modest scope bandwidth and sample rates.
 
-- **`12000` (default):** `clk_sys` runs directly from the 12 MHz crystal, and the system PLL is switched off. This gives the least clock noise and jitter.
-- **Any other value:** `clk_sys` comes from the system PLL. The value must be reachable exactly, e.g. `20000`, `24000`, `48000`, or `125000` (the SDK default on RP2040). If it isn't, the firmware panics at startup.
+- **`12000` (default):** the CPU normally runs at the SDK default clock (125 MHz on RP2040), so USB works. For each encryption it switches `clk_sys` to the 12 MHz crystal (`clk_ref`) with interrupts disabled:
 
-USB and UART run from the separate 48 MHz USB PLL, so serial works at any CPU clock.
+  1. switch `clk_sys` to the crystal, wait until the switch has completed
+  2. wait `CLOCK_SETTLE_US` (10 µs) so the supply settles after the drop in current
+  3. trigger **low**, AES, trigger **high**
+  4. switch `clk_sys` back to the PLL
+
+  Both clock switches are outside the trigger window, and the whole encryption runs from the crystal.
+- **`48000` or higher:** `clk_sys` comes from the system PLL the whole time, without switching. The value must be reachable exactly, e.g. `48000` or `125000`. If it isn't, the firmware panics at startup.
+
+Any other value fails to compile. USB device mode is unreliable when `clk_sys` is below 48 MHz (the board stops enumerating), which is why 12 MHz is only used inside the encryption window.
+
+The UART's peripheral clock runs from the 48 MHz USB PLL, so its baud rate doesn't depend on the CPU clock.
 
 ## Building
 
@@ -179,6 +189,7 @@ There is no local echo or banner; type `v` and press Enter to check that it's al
 - USB CDC servicing runs in interrupt context. With `TRIGGER_DISABLE_IRQ=1` it can't land inside a trigger window, but it can still run during the inter-block delay.
 - For the cleanest traces, use UART instead of USB and/or a separate supply. You can also compare with `TRIGGER_DISABLE_IRQ=0` to see what interrupt jitter looks like.
 - At the default 12 MHz, one encryption takes roughly 10× longer than at the SDK's default 125 MHz. Use `SYS_CLOCK_KHZ` to trade capture length against bandwidth.
+- The trigger window contains only the AES at 12 MHz. The clock switches and the settle time happen just before the trigger goes low and just after it goes high, so keep a negative capture delay (pre-trigger) shorter than `CLOCK_SETTLE_US` if you don't want the switch in your traces.
 
 ## Layout
 
