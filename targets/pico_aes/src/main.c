@@ -65,6 +65,14 @@
 #error "SYS_CLOCK_KHZ must be the crystal frequency (12000) or >= 48000; USB fails below 48 MHz"
 #endif
 
+/* Force the on-board SMPS into PWM mode (GPIO23 high on Pico / Pico 2): fixed
+ * switching frequency instead of irregular power-save bursts at light load.
+ * Harmless when the SMPS is disabled via 3V3_EN. No effect on boards without
+ * PICO_SMPS_MODE_PIN (e.g. Pico W, where the pin is on the wireless chip). */
+#ifndef SMPS_PWM_MODE
+#define SMPS_PWM_MODE 1
+#endif
+
 /* Time to let the supply settle after switching to the crystal clock, before
  * the trigger goes low (the core's current draw drops with the clock). */
 #ifndef CLOCK_SETTLE_US
@@ -277,6 +285,11 @@ static void handle_line(char *line)
 int main(void)
 {
     setup_clocks();
+#if SMPS_PWM_MODE && defined(PICO_SMPS_MODE_PIN)
+    gpio_init(PICO_SMPS_MODE_PIN);
+    gpio_put(PICO_SMPS_MODE_PIN, 1);
+    gpio_set_dir(PICO_SMPS_MODE_PIN, GPIO_OUT);
+#endif
     stdio_init_all();
 
     gpio_init(TRIGGER_PIN);

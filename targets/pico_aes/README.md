@@ -24,7 +24,65 @@ PicoAES is a small side-channel analysis (SCA) target for the Raspberry Pi Pico 
 
 Set the scope to trigger on the **falling edge** of GP2. The low pulse covers exactly one AES encryption: the initial AddRoundKey, 10 rounds, and the copy of the output.
 
-For power analysis, the usual approach is a shunt resistor in the supply path. On the Pico you can feed 3.3 V straight into the `3V3` pin (with `3V3_EN` pulled to GND to disable the on-board buck converter) through a shunt, or measure across a resistor in the VSYS/GND path. Near-field EM probes over the RP2040/RP2350 package also work well.
+For power analysis, put a shunt resistor in the supply path. Near-field EM probes over the RP2040/RP2350 package also work well. Either way, the cleanest traces come from powering the board from an external 3.3 V supply, as described next.
+
+## Clean power supply (external 3.3 V)
+
+By default the Pico makes its 3.3 V rail with an on-board switching regulator (SMPS), a buck-boost converter fed from USB 5 V or VSYS. The regulator and its inductor sit right next to the RP2040, so their switching noise shows up both on the supply and in an EM probe. At light load the regulator also runs in **power-save mode** and switches in irregular bursts. These aren't synchronised to the trigger, so they don't average out.
+
+There are two ways to deal with it.
+
+### Option 1: force PWM mode (firmware only, on by default)
+
+GPIO23 controls the regulator's power-save pin. With `SMPS_PWM_MODE=1` (the default), the firmware drives GPIO23 high at startup. That forces fixed-frequency PWM mode, which has lower ripple and no bursts. The regulator still runs, though, so this is a partial fix.
+
+### Option 2: disable the regulator and feed 3.3 V from a clean supply
+
+Pulling `3V3_EN` to GND switches the on-board regulator off. Then feed 3.3 V from a linear bench supply or a low-noise LDO straight into the `3V3` pin.
+
+| Pico pin | Connect to |
+|---|---|
+| **37 `3V3_EN`** | GND (disables the on-board regulator) |
+| **36 `3V3`** | +3.3 V from the clean supply, optionally through a shunt resistor (see below) |
+| **38 `GND`** | supply GND |
+| 39 `VSYS`, 40 `VBUS` | leave unconnected |
+| USB | keep plugged in, for serial and flashing |
+| **4 `GP2`**, **3 `GND`** | scope trigger input |
+
+```
+                               USB cable to PC (serial + flashing)
+                                         ||
+                                    +----||----+
+                    +---------------|   USB    |---------------+
+   UART TX     GP0  |  1  o         +----------+         o 40  |  VBUS      (n/c)
+   UART RX     GP1  |  2  o                              o 39  |  VSYS      (n/c)
+               GND  |  3  o                              o 38  |  GND    ---------*-------------------.
+   trigger --> GP2  |  4  o                              o 37  |  3V3_EN ---------'  tie to GND       |
+   to scope         |  5  o                              o 36  |  3V3    ----.                        |
+                    |  .                                    .  |             |                        |
+                    |  .           Raspberry Pi             .  |          +--+--+                     |
+                    |  .           Pico (RP2040)            .  |          |     |  R_shunt            |
+                    |  .                                    .  |          |     |  10-22 ohm          |
+                    |  .           (top view)               .  |          +--+--+  (optional)         |
+                    |                                          |             |                        |
+                    +------------------------------------------+             |  <-- scope probe here,  |
+                                                                             |      AC coupled        |
+                                                             +---------------+------------------------+---+
+                                                             |   +3.3 V (up to 3.6 V)            GND       |
+                                                             |   clean supply: linear bench supply / LDO  |
+                                                             +--------------------------------------------+
+```
+
+Notes:
+
+- **USB keeps working.** The RP2040, including its USB PHY, runs from the 3V3 rail, so USB serial and BOOTSEL flashing work as usual. USB 5 V still reaches VSYS through the on-board diode, but only up to the disabled regulator.
+- **Supply:** 3.3 V, and **never more than 3.6 V at the `3V3` pin** (the RP2040's I/O supply limit). Use a linear supply, not a switching one, with a current limit of about 100 mA. The board draws a few tens of mA.
+- **Order:** turn the 3.3 V supply on before, or together with, plugging in USB. With USB plugged in but no 3.3 V, the board simply stays off.
+- **Shunt for power analysis:** put it in the **3.3 V feed** (high side), as drawn. Don't put it in the ground return: with USB connected, the PC's ground and the scope's ground connect to the Pico's GND as well and bypass a ground-side shunt. The supply side of the shunt is clean DC. Probe the Pico side with AC coupling, or measure across the shunt with a differential probe.
+- **Voltage drop:** 10 Ω at 30 mA drops 0.3 V. You can raise the supply slightly to compensate, but the `3V3` pin must stay at or below 3.6 V even at idle, when the drop is smallest.
+- **On-board decoupling:** the Pico's capacitors on 3V3 smooth out the current spikes you want to see. Removing some of them gives sharper power traces, but that's a hardware mod and is not needed for EM.
+- **What remains:** the RP2040's internal core regulator (1.1 V) is still in the path, and on the Pico board it can't be bypassed without hardware surgery. The USB controller also handles the 1 ms USB frame timing in hardware even while interrupts are off, and the 48 MHz USB PLL keeps running. If those show up in your traces, disconnect USB data and use the UART on GP0/GP1 instead.
+- The Pico 2 uses the same pin numbers. Check the power section of the Pico / Pico 2 datasheet before modifying the board.
 
 ## Serial protocol
 
@@ -106,6 +164,7 @@ These compile-time options live at the top of [src/main.c](src/main.c). You can 
 | `TRIGGER_DISABLE_IRQ` | `1`     | Disable interrupts while the trigger is low (less jitter) |
 | `SYS_CLOCK_KHZ`       | `12000` | CPU clock in kHz while the AES runs (see below) |
 | `CLOCK_SETTLE_US`     | `10`    | Wait after switching to the crystal clock, before the trigger goes low |
+| `SMPS_PWM_MODE`       | `1`     | Drive GPIO23 high to force the on-board regulator into PWM mode (see [Clean power supply](#clean-power-supply-external-33-v)) |
 
 ```sh
 cmake -B build -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5 -DSYS_CLOCK_KHZ=48000

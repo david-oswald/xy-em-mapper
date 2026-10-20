@@ -22,7 +22,7 @@ add_executable(pico_aes
 set_source_files_properties(src/aes.c PROPERTIES COMPILE_OPTIONS "-O0")
 
 # Optional overrides, e.g. -DTRIGGER_PIN=15 -DBLOCK_DELAY_MS=5 -DSYS_CLOCK_KHZ=48000
-foreach(opt TRIGGER_PIN BLOCK_DELAY_MS TRIGGER_DISABLE_IRQ SYS_CLOCK_KHZ CLOCK_SETTLE_US)
+foreach(opt TRIGGER_PIN BLOCK_DELAY_MS TRIGGER_DISABLE_IRQ SYS_CLOCK_KHZ CLOCK_SETTLE_US SMPS_PWM_MODE)
     if(DEFINED ${opt})
         target_compile_definitions(pico_aes PRIVATE ${opt}=${${opt}})
     endif()
